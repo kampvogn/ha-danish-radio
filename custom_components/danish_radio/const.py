@@ -2,6 +2,7 @@
 
 DOMAIN = "danish_radio"
 
+CONF_NAME = "name"
 CONF_STATIONS = "stations"
 CONF_PROVIDER = "provider"
 CONF_STREAM_URL = "stream_url"
