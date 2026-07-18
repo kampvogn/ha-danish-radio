@@ -1,0 +1,9 @@
+{
+  "domain": "danish_radio",
+  "name": "Danish Radio",
+  "codeowners": [],
+  "documentation": "https://github.com/thl/ha-danish-radio",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
