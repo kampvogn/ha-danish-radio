@@ -49,26 +49,16 @@ radio:
       name: "Radio - Stue Chromecast"
       icon: mdi:cast
 
-  command_line:
-    - sensor:
-        name: "DR P3 nu spiller"
-        unique_id: dr_p3_nu_spiller
-        command: "python3 /config/scripts/dr_icy_now_playing.py p3"
-        scan_interval: 3600
-        value_template: "{{ value_json.state }}"
-        json_attributes:
-          - station
-          - program
-          - program_start
-          - program_end
-          - program_slug
-          - artist
-          - title
-          - stream_title
-          - raw_metadata
-          - stream_url
-          - updated_at
+  # "Nu spiller"-sensorer fra integrationen custom_components/danish_radio
+  # (sensor.dr_p3_nu_spiller, sensor.dr_p4_ostjylland_nu_spiller,
+  # sensor.nova_nu_spiller).
+  danish_radio:
+    stations:
+      - dr_p3
+      - dr_p4_oestjylland
+      - nova
 
+  command_line:
     - sensor:
         name: "DR P3 webcam stream"
         unique_id: dr_p3_webcam_stream
@@ -78,47 +68,6 @@ radio:
         value_template: "{{ value_json.state }}"
         json_attributes:
           - source
-          - updated_at
-
-    - sensor:
-        name: "DR P4 Østjylland nu spiller"
-        unique_id: dr_p4_oestjylland_nu_spiller
-        command: "python3 /config/scripts/dr_icy_now_playing.py p4aarhus"
-        scan_interval: 3600
-        value_template: "{{ value_json.state }}"
-        json_attributes:
-          - station
-          - program
-          - program_start
-          - program_end
-          - program_slug
-          - artist
-          - title
-          - stream_title
-          - raw_metadata
-          - stream_url
-          - updated_at
-
-    - sensor:
-        name: "Nova nu spiller"
-        unique_id: nova_nu_spiller
-        command: "python3 /config/scripts/dr_icy_now_playing.py nova"
-        scan_interval: 3600
-        value_template: "{{ value_json.state }}"
-        json_attributes:
-          - station
-          - program
-          - program_start
-          - program_end
-          - program_slug
-          - program_description
-          - artist
-          - title
-          - stream_title
-          - raw_metadata
-          - stream_url
-          - image
-          - track_source
           - updated_at
 
   template:

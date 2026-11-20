@@ -32,7 +32,10 @@ async def async_setup_platform(
     entities: list[DanishRadioSensor] = []
     for station in hass.data[DOMAIN][CONF_STATIONS]:
         coordinator = DanishRadioCoordinator(hass, station)
-        await coordinator.async_config_entry_first_refresh()
+        # YAML platform: no config entry, so async_config_entry_first_refresh()
+        # is not allowed. A failed first refresh leaves the sensor unavailable
+        # until the next poll instead of failing setup.
+        await coordinator.async_refresh()
         entities.append(DanishRadioSensor(coordinator, station))
     async_add_entities(entities)
 
@@ -45,6 +48,7 @@ class DanishRadioCoordinator(DataUpdateCoordinator[NowPlayingData]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=None,
             name=f"{station[CONF_NAME]} now playing",
             update_interval=station["scan_interval"],
         )

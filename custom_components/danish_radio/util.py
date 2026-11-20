@@ -8,7 +8,7 @@ import re
 from typing import Any
 import urllib.request
 
-USER_AGENT = "HomeAssistant-DanishRadio/0.1 (+https://github.com/thl/ha-danish-radio)"
+USER_AGENT = "HomeAssistant-DanishRadio/0.1 (+https://github.com/kampvogn/ha-danish-radio)"
 
 
 def read_json(url: str, headers: dict[str, str] | None = None) -> Any:
