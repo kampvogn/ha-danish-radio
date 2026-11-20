@@ -1,15 +1,24 @@
+# Radio-app til Home Assistant.
+#
+# Kortet på dashboardet er en fjernbetjening: vælg en afspiller, og vælg en
+# station til den. Hver afspiller husker sin egen station, så flere
+# afspillere kan spille samtidig, også forskellige stationer.
+#
+# Afspillere og stationer defineres ét sted: sensor.radio_konfiguration
+# (nederst under template). Tilføj en afspiller dér og i
+# input_select.radio_afspiller; en station dér og i input_select.radio_station.
 radio:
   input_select:
     radio_afspiller:
       name: "Radio - afspiller"
       icon: mdi:speaker
       options:
-        - media_player.kokken
-        - media_player.sovevaerelse
-        - media_player.unnamed_room
-        - media_player.terasse
-        - media_player.tv_samsungen
-        - media_player.stue_chromecast
+        - Køkken
+        - Soveværelse
+        - Unnamed Room
+        - Terrasse
+        - Samsungen
+        - Stue Chromecast
 
     radio_station:
       name: "Radio - station"
@@ -29,25 +38,13 @@ radio:
       mode: slider
       unit_of_measurement: "%"
 
-  input_boolean:
-    radio_afspiller_kokken:
-      name: "Radio - Køkken"
-      icon: mdi:speaker
-    radio_afspiller_sovevaerelse:
-      name: "Radio - Soveværelse"
-      icon: mdi:speaker
-    radio_afspiller_unnamed_room:
-      name: "Radio - Unnamed Room"
-      icon: mdi:speaker
-    radio_afspiller_terasse:
-      name: "Radio - Terrasse"
-      icon: mdi:speaker
-    radio_afspiller_samsungen:
-      name: "Radio - Samsungen"
-      icon: mdi:television
-    radio_afspiller_stue_chromecast:
-      name: "Radio - Stue Chromecast"
-      icon: mdi:cast
+  input_text:
+    # JSON: {"media_player.x": "DR P3", ...} - hvilken station hver afspiller
+    # sidst fik. Bruges til at vise afspillerens station, når den vælges.
+    radio_afspiller_stationer:
+      name: "Radio - stationer pr. afspiller"
+      icon: mdi:code-json
+      max: 255
 
   # "Nu spiller"-sensorer fra integrationen custom_components/danish_radio
   # (sensor.dr_p3_nu_spiller, sensor.dr_p4_ostjylland_nu_spiller,
@@ -72,107 +69,155 @@ radio:
 
   template:
     - sensor:
+        - name: "Radio konfiguration"
+          unique_id: radio_konfiguration
+          icon: mdi:cog
+          state: "ok"
+          attributes:
+            # Navn i dropdown -> media_player
+            afspillere: >-
+              {{ {
+                'Køkken': 'media_player.kokken',
+                'Soveværelse': 'media_player.sovevaerelse',
+                'Unnamed Room': 'media_player.unnamed_room',
+                'Terrasse': 'media_player.terasse',
+                'Samsungen': 'media_player.tv_samsungen',
+                'Stue Chromecast': 'media_player.stue_chromecast'
+              } }}
+            # Fjernsyn: DR P3 spilles som video fra studiet (HLS med lyd).
+            tv: "{{ ['media_player.tv_samsungen', 'media_player.stue_chromecast'] }}"
+            # match: tekst i afspillerens media_content_id, der viser, at
+            # stationen (stadig) spiller.
+            stationer: >-
+              {{ {
+                'DR P3': {
+                  'titel': 'DR P3',
+                  'url': 'http://live-icy.gslb01.dr.dk/A/A05H.mp3',
+                  'logo': 'https://www.dr.dk/lyd/_next/static/media/p3.28743ad0.svg',
+                  'sensor': 'sensor.dr_p3_nu_spiller',
+                  'match': ['A05H', 'p3webcam']
+                },
+                'DR P4': {
+                  'titel': 'DR P4 Østjylland',
+                  'url': 'http://live-icy.gslb01.dr.dk/A/A14H.mp3',
+                  'logo': 'https://www.dr.dk/lyd/_next/static/media/p4.a9a465ed.svg',
+                  'sensor': 'sensor.dr_p4_ostjylland_nu_spiller',
+                  'match': ['A14H']
+                },
+                'Nova': {
+                  'titel': 'Nova',
+                  'url': 'http://live-bauerdk.sharp-stream.com/nova128.mp3',
+                  'logo': 'https://assets.planetradio.co.uk/img/ConfigWebListenBarLogoImageUrl/174.jpg?ver=1490690222',
+                  'sensor': 'sensor.nova_nu_spiller',
+                  'match': ['nova']
+                }
+              } }}
+
+        - name: "Radio valgt afspiller"
+          unique_id: radio_valgt_afspiller
+          icon: mdi:speaker
+          state: >-
+            {{ (state_attr('sensor.radio_konfiguration', 'afspillere') or {})
+               .get(states('input_select.radio_afspiller'), 'unknown') }}
+          attributes:
+            volume: >-
+              {% set e = (state_attr('sensor.radio_konfiguration', 'afspillere') or {})
+                         .get(states('input_select.radio_afspiller')) %}
+              {{ state_attr(e, 'volume_level') if e else none }}
+
         - name: "Radio valgt station info"
           unique_id: radio_valgt_station_info
           icon: mdi:radio
-          state: >
+          state: >-
             {% set valgt = states('input_select.radio_station') %}
-            {% set entity = {
-              'DR P3': 'sensor.dr_p3_nu_spiller',
-              'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-              'Nova': 'sensor.nova_nu_spiller'
-            }.get(valgt) %}
-            {% if entity %}
-              {% set kanal = state_attr(entity, 'station') or valgt %}
-              {% set program = state_attr(entity, 'program') %}
-              {% set titel = state_attr(entity, 'stream_title') %}
-              {{ kanal }}{% if program %} - {{ program }}{% endif %}{% if titel %}: {{ titel }}{% endif %}
+            {% set st = (state_attr('sensor.radio_konfiguration', 'stationer') or {}).get(valgt) %}
+            {% if st %}
+              {% set kanal = state_attr(st.sensor, 'station') or st.titel %}
+              {% set program = state_attr(st.sensor, 'program') %}
+              {% set titel = state_attr(st.sensor, 'stream_title') %}
+              {{ (kanal ~ (' - ' ~ program if program else '') ~ (': ' ~ titel if titel else ''))[:255] }}
             {% else %}
               {{ valgt }}
             {% endif %}
           attributes:
-            station: >
+            station: >-
               {% set valgt = states('input_select.radio_station') %}
-              {% set entity = {
-                'DR P3': 'sensor.dr_p3_nu_spiller',
-                'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-                'Nova': 'sensor.nova_nu_spiller'
-              }.get(valgt) %}
-              {{ state_attr(entity, 'station') if entity else valgt }}
-            program: >
-              {% set entity = {
-                'DR P3': 'sensor.dr_p3_nu_spiller',
-                'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-                'Nova': 'sensor.nova_nu_spiller'
-              }.get(states('input_select.radio_station')) %}
-              {{ state_attr(entity, 'program') if entity else '' }}
-            artist: >
-              {% set entity = {
-                'DR P3': 'sensor.dr_p3_nu_spiller',
-                'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-                'Nova': 'sensor.nova_nu_spiller'
-              }.get(states('input_select.radio_station')) %}
-              {{ state_attr(entity, 'artist') if entity else '' }}
-            title: >
-              {% set entity = {
-                'DR P3': 'sensor.dr_p3_nu_spiller',
-                'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-                'Nova': 'sensor.nova_nu_spiller'
-              }.get(states('input_select.radio_station')) %}
-              {{ state_attr(entity, 'title') if entity else '' }}
-            stream_title: >
-              {% set entity = {
-                'DR P3': 'sensor.dr_p3_nu_spiller',
-                'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-                'Nova': 'sensor.nova_nu_spiller'
-              }.get(states('input_select.radio_station')) %}
-              {{ state_attr(entity, 'stream_title') if entity else '' }}
+              {% set st = (state_attr('sensor.radio_konfiguration', 'stationer') or {}).get(valgt) %}
+              {{ (state_attr(st.sensor, 'station') or st.titel) if st else valgt }}
+            program: >-
+              {% set st = (state_attr('sensor.radio_konfiguration', 'stationer') or {}).get(states('input_select.radio_station')) %}
+              {{ state_attr(st.sensor, 'program') if st else '' }}
+            artist: >-
+              {% set st = (state_attr('sensor.radio_konfiguration', 'stationer') or {}).get(states('input_select.radio_station')) %}
+              {{ state_attr(st.sensor, 'artist') if st else '' }}
+            title: >-
+              {% set st = (state_attr('sensor.radio_konfiguration', 'stationer') or {}).get(states('input_select.radio_station')) %}
+              {{ state_attr(st.sensor, 'title') if st else '' }}
+            stream_title: >-
+              {% set st = (state_attr('sensor.radio_konfiguration', 'stationer') or {}).get(states('input_select.radio_station')) %}
+              {{ state_attr(st.sensor, 'stream_title') if st else '' }}
+
+        # Antal afspillere, der spiller radio lige nu; attributten afspillere
+        # har én række pr. afspiller (navn, entity, station, info).
+        - name: "Radio spiller nu"
+          unique_id: radio_spiller_nu
+          icon: mdi:radio-tower
+          state: >-
+            {% set afspillere = state_attr('sensor.radio_konfiguration', 'afspillere') or {} %}
+            {% set stationer = state_attr('sensor.radio_konfiguration', 'stationer') or {} %}
+            {% set gemt = states('input_text.radio_afspiller_stationer') | from_json(default={}) %}
+            {% set ns = namespace(ud=[]) %}
+            {% for navn, e in afspillere.items() %}
+              {% set station = gemt.get(e) %}
+              {% set st = stationer.get(station) %}
+              {% set cid = state_attr(e, 'media_content_id') or '' %}
+              {% if is_state(e, 'playing') and st
+                    and (cid == '' or st.match | select('in', cid) | list | count > 0) %}
+                {% set titel = state_attr(st.sensor, 'stream_title') or state_attr(st.sensor, 'program') or '' %}
+                {% set ns.ud = ns.ud + [{'navn': navn, 'entity_id': e, 'station': station, 'info': titel}] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.ud | count }}
+          attributes:
+            afspillere: >-
+              {% set afspillere = state_attr('sensor.radio_konfiguration', 'afspillere') or {} %}
+              {% set stationer = state_attr('sensor.radio_konfiguration', 'stationer') or {} %}
+              {% set gemt = states('input_text.radio_afspiller_stationer') | from_json(default={}) %}
+              {% set ns = namespace(ud=[]) %}
+              {% for navn, e in afspillere.items() %}
+                {% set station = gemt.get(e) %}
+                {% set st = stationer.get(station) %}
+                {% set cid = state_attr(e, 'media_content_id') or '' %}
+                {% if is_state(e, 'playing') and st
+                      and (cid == '' or st.match | select('in', cid) | list | count > 0) %}
+                  {% set titel = state_attr(st.sensor, 'stream_title') or state_attr(st.sensor, 'program') or '' %}
+                  {% set ns.ud = ns.ud + [{'navn': navn, 'entity_id': e, 'station': station, 'info': titel}] %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.ud }}
 
     - binary_sensor:
         - name: "Radio valgt afspiller mutet"
           unique_id: radio_valgt_afspiller_muted
-          icon: >
-            {% if state_attr(states('input_select.radio_afspiller'), 'is_volume_muted') | bool(false) %}
-              mdi:volume-mute
-            {% else %}
-              mdi:volume-high
-            {% endif %}
-          state: >
-            {{ state_attr(states('input_select.radio_afspiller'), 'is_volume_muted') | bool(false) }}
+          icon: >-
+            {{ 'mdi:volume-mute' if state_attr(states('sensor.radio_valgt_afspiller'), 'is_volume_muted') | bool(false) else 'mdi:volume-high' }}
+          state: >-
+            {{ state_attr(states('sensor.radio_valgt_afspiller'), 'is_volume_muted') | bool(false) }}
 
         - name: "Radio valgt afspiller spiller"
           unique_id: radio_valgt_afspiller_spiller
-          icon: >
-            {% if is_state(states('input_select.radio_afspiller'), 'playing') %}
-              mdi:pause
-            {% else %}
-              mdi:play
-            {% endif %}
-          state: >
-            {{ is_state(states('input_select.radio_afspiller'), 'playing') }}
+          icon: >-
+            {{ 'mdi:pause' if is_state(states('sensor.radio_valgt_afspiller'), 'playing') else 'mdi:play' }}
+          state: >-
+            {{ is_state(states('sensor.radio_valgt_afspiller'), 'playing') }}
 
   script:
-    radio_spil_dr_p3:
-      alias: "Radio: spil DR P3"
-      description: "Spiller DR P3 på en valgt media player"
-      mode: restart
-      fields:
-        afspiller:
-          name: Afspiller
-          required: true
-          selector:
-            entity:
-              domain: media_player
-      sequence:
-        - action: script.radio_spil_station
-          data:
-            afspiller: "{{ afspiller }}"
-            station: DR P3
-
     radio_spil_station:
       alias: "Radio: spil station"
-      description: "Spiller en valgt radiostation på en valgt media player"
-      mode: restart
+      description: "Spiller en radiostation på en media player og husker valget"
+      # parallel: flere afspillere kan startes samtidig uden at afbryde hinanden.
+      mode: parallel
+      max: 20
       fields:
         afspiller:
           name: Afspiller
@@ -190,30 +235,24 @@ radio:
                 - DR P4
                 - Nova
       variables:
-        stationer:
-          DR P3:
-            titel: DR P3
-            url: http://live-icy.gslb01.dr.dk/A/A05H.mp3
-            logo: https://www.dr.dk/lyd/_next/static/media/p3.28743ad0.svg
-          DR P4:
-            titel: DR P4 Østjylland
-            url: http://live-icy.gslb01.dr.dk/A/A14H.mp3
-            logo: https://www.dr.dk/lyd/_next/static/media/p4.a9a465ed.svg
-          Nova:
-            titel: Nova
-            url: http://live-bauerdk.sharp-stream.com/nova128.mp3
-            logo: https://assets.planetradio.co.uk/img/ConfigWebListenBarLogoImageUrl/174.jpg?ver=1490690222
-        valgt_station: "{{ stationer.get(station, stationer['DR P3']) }}"
-        # Fjernsyn får DR P3 som video fra studiet (HLS med lyd), i stedet for mp3.
-        tv_afspillere:
-          - media_player.tv_samsungen
-          - media_player.stue_chromecast
+        stationer: "{{ state_attr('sensor.radio_konfiguration', 'stationer') or {} }}"
+        valgt_station: "{{ stationer.get(station) or stationer.get('DR P3') }}"
+        station_navn: "{{ station if station in stationer else 'DR P3' }}"
         p3_video_url: >-
           {% set u = states('sensor.dr_p3_webcam_stream') %}
           {{ u if u.startswith('https://') else
              'https://drp3webcamhls.akamaized.net/hls/live/20003007/p3webcam/mastervg.m3u8' }}
-        video: "{{ station == 'DR P3' and afspiller in tv_afspillere }}"
+        video: >-
+          {{ station_navn == 'DR P3'
+             and afspiller in (state_attr('sensor.radio_konfiguration', 'tv') or []) }}
       sequence:
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.radio_afspiller_stationer
+          data:
+            value: >-
+              {% set gemt = states('input_text.radio_afspiller_stationer') | from_json(default={}) %}
+              {{ dict(gemt.items() | list + [(afspiller, station_navn)]) | to_json }}
         - action: media_player.play_media
           target:
             entity_id: "{{ afspiller }}"
@@ -226,361 +265,171 @@ radio:
                 thumbnail: "{{ valgt_station.logo }}"
                 media_class: "{{ 'video' if video else 'music' }}"
 
-    radio_spil_dr_p3_valgt:
-      alias: "Radio: spil DR P3 på valgt afspiller"
-      description: "Bruger Radio - afspiller som mål"
-      mode: restart
+    radio_spil_dr_p3:
+      alias: "Radio: spil DR P3"
+      description: "Spiller DR P3 på en valgt media player"
+      mode: parallel
+      fields:
+        afspiller:
+          name: Afspiller
+          required: true
+          selector:
+            entity:
+              domain: media_player
       sequence:
-        - action: script.radio_spil_dr_p3
+        - action: script.radio_spil_station
           data:
-            afspiller: "{{ states('input_select.radio_afspiller') }}"
+            afspiller: "{{ afspiller }}"
+            station: DR P3
 
     radio_spil_valgt:
-      alias: "Radio: spil valgt station"
-      description: "Spiller Radio - station på alle valgte radio-afspillere"
+      alias: "Radio: spil valgt station på valgt afspiller"
       mode: restart
       sequence:
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_kokken
-              state: "on"
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: media_player.kokken
-                station: "{{ states('input_select.radio_station') }}"
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_sovevaerelse
-              state: "on"
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: media_player.sovevaerelse
-                station: "{{ states('input_select.radio_station') }}"
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_unnamed_room
-              state: "on"
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: media_player.unnamed_room
-                station: "{{ states('input_select.radio_station') }}"
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_terasse
-              state: "on"
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: media_player.terasse
-                station: "{{ states('input_select.radio_station') }}"
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_samsungen
-              state: "on"
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: media_player.tv_samsungen
-                station: "{{ states('input_select.radio_station') }}"
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_stue_chromecast
-              state: "on"
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: media_player.stue_chromecast
-                station: "{{ states('input_select.radio_station') }}"
-        - if:
-            - condition: template
-              value_template: >
-                {{ not (
-                  is_state('input_boolean.radio_afspiller_kokken', 'on')
-                  or is_state('input_boolean.radio_afspiller_sovevaerelse', 'on')
-                  or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
-                  or is_state('input_boolean.radio_afspiller_terasse', 'on')
-                  or is_state('input_boolean.radio_afspiller_samsungen', 'on')
-                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
-                ) }}
-          then:
-            - action: script.radio_spil_station
-              data:
-                afspiller: "{{ states('input_select.radio_afspiller') }}"
-                station: "{{ states('input_select.radio_station') }}"
-
-    radio_mute_valgt:
-      alias: "Radio: mute valgt afspiller"
-      description: "Skifter mute på den valgte radio-afspiller"
-      mode: single
-      sequence:
-        - action: media_player.volume_mute
-          target:
-            entity_id: "{{ states('input_select.radio_afspiller') }}"
+        - condition: template
+          value_template: "{{ states('sensor.radio_valgt_afspiller').startswith('media_player.') }}"
+        - action: script.radio_spil_station
           data:
-            is_volume_muted: >
-              {{ not (state_attr(states('input_select.radio_afspiller'), 'is_volume_muted') | bool(false)) }}
+            afspiller: "{{ states('sensor.radio_valgt_afspiller') }}"
+            station: "{{ states('input_select.radio_station') }}"
 
     radio_toggle_valgt:
       alias: "Radio: skift play/pause på valgt afspiller"
-      description: "Pauser afspilning eller starter den valgte station"
       mode: restart
       sequence:
         - if:
             - condition: template
-              value_template: "{{ is_state(states('input_select.radio_afspiller'), 'playing') }}"
+              value_template: "{{ is_state(states('sensor.radio_valgt_afspiller'), 'playing') }}"
           then:
             - action: script.radio_pause_valgt
           else:
             - action: script.radio_spil_valgt
 
-    radio_stop_valgt:
-      alias: "Radio: stop valgt afspiller"
-      description: "Stopper afspilning på alle valgte radio-afspillere"
-      mode: restart
-      sequence:
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_kokken
-              state: "on"
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.kokken
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_sovevaerelse
-              state: "on"
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.sovevaerelse
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_unnamed_room
-              state: "on"
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.unnamed_room
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_terasse
-              state: "on"
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.terasse
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_samsungen
-              state: "on"
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.tv_samsungen
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_stue_chromecast
-              state: "on"
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.stue_chromecast
-        - if:
-            - condition: template
-              value_template: >
-                {{ not (
-                  is_state('input_boolean.radio_afspiller_kokken', 'on')
-                  or is_state('input_boolean.radio_afspiller_sovevaerelse', 'on')
-                  or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
-                  or is_state('input_boolean.radio_afspiller_terasse', 'on')
-                  or is_state('input_boolean.radio_afspiller_samsungen', 'on')
-                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
-                ) }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: "{{ states('input_select.radio_afspiller') }}"
-
     radio_pause_valgt:
       alias: "Radio: pause valgt afspiller"
-      description: "Pauser alle valgte radio-afspillere, og stopper hvis pause ikke understøttes"
+      description: "Pauser valgt afspiller, og stopper den, hvis pause ikke understøttes"
       mode: restart
+      variables:
+        afspiller: "{{ states('sensor.radio_valgt_afspiller') }}"
       sequence:
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_kokken
-              state: "on"
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: media_player.kokken
-              continue_on_error: true
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_sovevaerelse
-              state: "on"
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: media_player.sovevaerelse
-              continue_on_error: true
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_unnamed_room
-              state: "on"
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: media_player.unnamed_room
-              continue_on_error: true
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_terasse
-              state: "on"
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: media_player.terasse
-              continue_on_error: true
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_samsungen
-              state: "on"
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: media_player.tv_samsungen
-              continue_on_error: true
-        - if:
-            - condition: state
-              entity_id: input_boolean.radio_afspiller_stue_chromecast
-              state: "on"
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: media_player.stue_chromecast
-              continue_on_error: true
-        - if:
-            - condition: template
-              value_template: >
-                {{ not (
-                  is_state('input_boolean.radio_afspiller_kokken', 'on')
-                  or is_state('input_boolean.radio_afspiller_sovevaerelse', 'on')
-                  or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
-                  or is_state('input_boolean.radio_afspiller_terasse', 'on')
-                  or is_state('input_boolean.radio_afspiller_samsungen', 'on')
-                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
-                ) }}
-          then:
-            - action: media_player.media_pause
-              target:
-                entity_id: "{{ states('input_select.radio_afspiller') }}"
-              continue_on_error: true
+        - condition: template
+          value_template: "{{ afspiller.startswith('media_player.') }}"
+        - action: media_player.media_pause
+          target:
+            entity_id: "{{ afspiller }}"
+          continue_on_error: true
         - delay:
             seconds: 1
         - if:
             - condition: template
-              value_template: >
-                {{ is_state('input_boolean.radio_afspiller_kokken', 'on') and is_state('media_player.kokken', 'playing') }}
+              value_template: "{{ is_state(afspiller, 'playing') }}"
           then:
             - action: media_player.media_stop
               target:
-                entity_id: media_player.kokken
-        - if:
-            - condition: template
-              value_template: >
-                {{ is_state('input_boolean.radio_afspiller_sovevaerelse', 'on') and is_state('media_player.sovevaerelse', 'playing') }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.sovevaerelse
-        - if:
-            - condition: template
-              value_template: >
-                {{ is_state('input_boolean.radio_afspiller_unnamed_room', 'on') and is_state('media_player.unnamed_room', 'playing') }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.unnamed_room
-        - if:
-            - condition: template
-              value_template: >
-                {{ is_state('input_boolean.radio_afspiller_terasse', 'on') and is_state('media_player.terasse', 'playing') }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.terasse
-        - if:
-            - condition: template
-              value_template: >
-                {{ is_state('input_boolean.radio_afspiller_samsungen', 'on') and is_state('media_player.tv_samsungen', 'playing') }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.tv_samsungen
-        - if:
-            - condition: template
-              value_template: >
-                {{ is_state('input_boolean.radio_afspiller_stue_chromecast', 'on') and is_state('media_player.stue_chromecast', 'playing') }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: media_player.stue_chromecast
-        - if:
-            - condition: template
-              value_template: >
-                {{ not (
-                  is_state('input_boolean.radio_afspiller_kokken', 'on')
-                  or is_state('input_boolean.radio_afspiller_sovevaerelse', 'on')
-                  or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
-                  or is_state('input_boolean.radio_afspiller_terasse', 'on')
-                  or is_state('input_boolean.radio_afspiller_samsungen', 'on')
-                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
-                ) and states(states('input_select.radio_afspiller')) == 'playing' }}
-          then:
-            - action: media_player.media_stop
-              target:
-                entity_id: "{{ states('input_select.radio_afspiller') }}"
+                entity_id: "{{ afspiller }}"
+
+    radio_stop_valgt:
+      alias: "Radio: stop valgt afspiller"
+      mode: restart
+      sequence:
+        - condition: template
+          value_template: "{{ states('sensor.radio_valgt_afspiller').startswith('media_player.') }}"
+        - action: media_player.media_stop
+          target:
+            entity_id: "{{ states('sensor.radio_valgt_afspiller') }}"
+
+    radio_stop_alle:
+      alias: "Radio: stop alle"
+      description: "Stopper alle afspillere, der spiller radio"
+      mode: restart
+      variables:
+        afspillere: >-
+          {{ state_attr('sensor.radio_spiller_nu', 'afspillere') | default([], true)
+             | map(attribute='entity_id') | list }}
+      sequence:
+        - condition: template
+          value_template: "{{ afspillere | count > 0 }}"
+        - action: media_player.media_stop
+          target:
+            entity_id: "{{ afspillere }}"
+          continue_on_error: true
+
+    radio_mute_valgt:
+      alias: "Radio: mute valgt afspiller"
+      mode: single
+      sequence:
+        - action: media_player.volume_mute
+          target:
+            entity_id: "{{ states('sensor.radio_valgt_afspiller') }}"
+          data:
+            is_volume_muted: >-
+              {{ not (state_attr(states('sensor.radio_valgt_afspiller'), 'is_volume_muted') | bool(false)) }}
 
   automation:
+    # Vælg en station = spil den på den valgte afspiller. Når dropdownen kun
+    # ændres, fordi en anden afspiller blev valgt (se næste automation), er
+    # stationen allerede afspillerens, og der sker ikke mere.
+    - id: radio_spil_valgt_station_ved_dropdown_skift
+      alias: "Radio: spil valgt station når dropdown ændres"
+      mode: restart
+      triggers:
+        - trigger: state
+          entity_id: input_select.radio_station
+      conditions:
+        - condition: template
+          value_template: >-
+            {% set e = states('sensor.radio_valgt_afspiller') %}
+            {% set gemt = states('input_text.radio_afspiller_stationer') | from_json(default={}) %}
+            {{ trigger.from_state is not none
+               and trigger.to_state is not none
+               and trigger.from_state.state not in ['unknown', 'unavailable']
+               and trigger.to_state.state not in ['unknown', 'unavailable']
+               and e.startswith('media_player.')
+               and gemt.get(e) != trigger.to_state.state }}
+      actions:
+        - action: script.radio_spil_valgt
+
+    # Vælg en afspiller = vis den station, den sidst fik.
+    - id: radio_vis_station_for_valgt_afspiller
+      alias: "Radio: vis station for valgt afspiller"
+      mode: restart
+      triggers:
+        - trigger: state
+          entity_id: sensor.radio_valgt_afspiller
+      conditions:
+        - condition: template
+          value_template: >-
+            {% set gemt = states('input_text.radio_afspiller_stationer') | from_json(default={}) %}
+            {% set st = gemt.get(trigger.to_state.state) %}
+            {{ st is not none
+               and st in state_attr('input_select.radio_station', 'options')
+               and st != states('input_select.radio_station') }}
+      actions:
+        - action: input_select.select_option
+          target:
+            entity_id: input_select.radio_station
+          data:
+            option: >-
+              {{ (states('input_text.radio_afspiller_stationer') | from_json(default={})).get(trigger.to_state.state) }}
+
     - id: radio_sync_volume_to_selected_player
       alias: "Radio: synkroniser lydstyrke fra valgt afspiller"
       mode: restart
       triggers:
         - trigger: state
-          entity_id:
-            - input_select.radio_afspiller
-            - media_player.kokken
-            - media_player.sovevaerelse
-            - media_player.unnamed_room
-            - media_player.terasse
-            - media_player.tv_samsungen
-            - media_player.stue_chromecast
+          entity_id: sensor.radio_valgt_afspiller
+        - trigger: state
+          entity_id: sensor.radio_valgt_afspiller
+          attribute: volume
       conditions:
         - condition: template
-          value_template: >
-            {% set player = states('input_select.radio_afspiller') %}
-            {{ player in [
-              'media_player.kokken',
-              'media_player.sovevaerelse',
-              'media_player.unnamed_room',
-              'media_player.terasse',
-              'media_player.tv_samsungen',
-              'media_player.stue_chromecast'
-            ]
-            and state_attr(player, 'volume_level') is not none
-            and trigger.entity_id in ['input_select.radio_afspiller', player] }}
+          value_template: "{{ state_attr('sensor.radio_valgt_afspiller', 'volume') is number }}"
       actions:
         - action: input_number.set_value
           target:
             entity_id: input_number.radio_volume
           data:
-            value: >
-              {{ (state_attr(states('input_select.radio_afspiller'), 'volume_level') | float(0) * 100) | round(0) }}
+            value: "{{ (state_attr('sensor.radio_valgt_afspiller', 'volume') * 100) | round(0) }}"
 
     - id: radio_set_volume_on_selected_player
       alias: "Radio: indstil lydstyrke på valgt afspiller"
@@ -590,186 +439,38 @@ radio:
           entity_id: input_number.radio_volume
       conditions:
         - condition: template
-          value_template: >
-            {{ states('input_select.radio_afspiller') in [
-              'media_player.kokken',
-              'media_player.sovevaerelse',
-              'media_player.unnamed_room',
-              'media_player.terasse',
-              'media_player.tv_samsungen',
-              'media_player.stue_chromecast'
-            ] }}
+          value_template: >-
+            {% set v = state_attr('sensor.radio_valgt_afspiller', 'volume') %}
+            {{ states('sensor.radio_valgt_afspiller').startswith('media_player.')
+               and (v is not number or (v * 100) | round(0) != states('input_number.radio_volume') | float(0)) }}
       actions:
         - action: media_player.volume_set
           target:
-            entity_id: "{{ states('input_select.radio_afspiller') }}"
+            entity_id: "{{ states('sensor.radio_valgt_afspiller') }}"
           data:
             volume_level: "{{ states('input_number.radio_volume') | float(0) / 100 }}"
 
-    - id: radio_spil_valgt_station_ved_dropdown_skift
-      alias: "Radio: spil valgt station når dropdown ændres"
-      mode: restart
-      triggers:
-        - trigger: state
-          entity_id: input_select.radio_station
-      conditions:
-        - condition: template
-          value_template: >
-            {{ trigger.from_state is not none
-              and trigger.to_state is not none
-              and trigger.from_state.state not in ['unknown', 'unavailable']
-              and trigger.to_state.state not in ['unknown', 'unavailable']
-              and states('input_select.radio_afspiller') not in ['unknown', 'unavailable', ''] }}
-      actions:
-        - action: script.radio_spil_valgt
-
-    - id: radio_spil_eller_stop_naar_afspiller_tilvalg_aendres
-      alias: "Radio: spil eller stop når afspillervalg ændres"
-      mode: queued
-      triggers:
-        - trigger: state
-          entity_id:
-            - input_boolean.radio_afspiller_kokken
-            - input_boolean.radio_afspiller_sovevaerelse
-            - input_boolean.radio_afspiller_unnamed_room
-            - input_boolean.radio_afspiller_terasse
-            - input_boolean.radio_afspiller_samsungen
-            - input_boolean.radio_afspiller_stue_chromecast
-      conditions:
-        - condition: template
-          value_template: >
-            {{ trigger.from_state is not none
-              and trigger.to_state is not none
-              and trigger.to_state.state in ['on', 'off'] }}
-      actions:
-        - choose:
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_kokken' and trigger.to_state.state == 'on' }}"
-              sequence:
-                - action: script.radio_spil_station
-                  data:
-                    afspiller: media_player.kokken
-                    station: "{{ states('input_select.radio_station') }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_sovevaerelse' and trigger.to_state.state == 'on' }}"
-              sequence:
-                - action: script.radio_spil_station
-                  data:
-                    afspiller: media_player.sovevaerelse
-                    station: "{{ states('input_select.radio_station') }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_unnamed_room' and trigger.to_state.state == 'on' }}"
-              sequence:
-                - action: script.radio_spil_station
-                  data:
-                    afspiller: media_player.unnamed_room
-                    station: "{{ states('input_select.radio_station') }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_terasse' and trigger.to_state.state == 'on' }}"
-              sequence:
-                - action: script.radio_spil_station
-                  data:
-                    afspiller: media_player.terasse
-                    station: "{{ states('input_select.radio_station') }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_samsungen' and trigger.to_state.state == 'on' }}"
-              sequence:
-                - action: script.radio_spil_station
-                  data:
-                    afspiller: media_player.tv_samsungen
-                    station: "{{ states('input_select.radio_station') }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_stue_chromecast' and trigger.to_state.state == 'on' }}"
-              sequence:
-                - action: script.radio_spil_station
-                  data:
-                    afspiller: media_player.stue_chromecast
-                    station: "{{ states('input_select.radio_station') }}"
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_kokken' and trigger.to_state.state == 'off' }}"
-              sequence:
-                - action: media_player.media_stop
-                  target:
-                    entity_id: media_player.kokken
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_sovevaerelse' and trigger.to_state.state == 'off' }}"
-              sequence:
-                - action: media_player.media_stop
-                  target:
-                    entity_id: media_player.sovevaerelse
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_unnamed_room' and trigger.to_state.state == 'off' }}"
-              sequence:
-                - action: media_player.media_stop
-                  target:
-                    entity_id: media_player.unnamed_room
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_terasse' and trigger.to_state.state == 'off' }}"
-              sequence:
-                - action: media_player.media_stop
-                  target:
-                    entity_id: media_player.terasse
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_samsungen' and trigger.to_state.state == 'off' }}"
-              sequence:
-                - action: media_player.media_stop
-                  target:
-                    entity_id: media_player.tv_samsungen
-            - conditions:
-                - condition: template
-                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_stue_chromecast' and trigger.to_state.state == 'off' }}"
-              sequence:
-                - action: media_player.media_stop
-                  target:
-                    entity_id: media_player.stue_chromecast
-
+    # Opdater "nu spiller" hvert 10. sekund for de stationer, der spiller.
     - id: radio_opdater_metadata_oftere_ved_afspilning
       alias: "Radio: opdater metadata oftere ved afspilning"
       mode: single
       triggers:
         - trigger: time_pattern
           seconds: "/10"
+      variables:
+        sensorer: >-
+          {% set stationer = state_attr('sensor.radio_konfiguration', 'stationer') or {} %}
+          {% set ns = namespace(s=[]) %}
+          {% for r in state_attr('sensor.radio_spiller_nu', 'afspillere') | default([], true) %}
+            {% if r.station in stationer %}
+              {% set ns.s = ns.s + [stationer[r.station].sensor] %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.s | unique | list }}
       conditions:
         - condition: template
-          value_template: >
-            {{
-              (is_state('input_boolean.radio_afspiller_kokken', 'on') and is_state('media_player.kokken', 'playing'))
-              or (is_state('input_boolean.radio_afspiller_sovevaerelse', 'on') and is_state('media_player.sovevaerelse', 'playing'))
-              or (is_state('input_boolean.radio_afspiller_unnamed_room', 'on') and is_state('media_player.unnamed_room', 'playing'))
-              or (is_state('input_boolean.radio_afspiller_terasse', 'on') and is_state('media_player.terasse', 'playing'))
-              or (is_state('input_boolean.radio_afspiller_samsungen', 'on') and is_state('media_player.tv_samsungen', 'playing'))
-              or (is_state('input_boolean.radio_afspiller_stue_chromecast', 'on') and is_state('media_player.stue_chromecast', 'playing'))
-              or (
-                not (
-                  is_state('input_boolean.radio_afspiller_kokken', 'on')
-                  or is_state('input_boolean.radio_afspiller_sovevaerelse', 'on')
-                  or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
-                  or is_state('input_boolean.radio_afspiller_terasse', 'on')
-                  or is_state('input_boolean.radio_afspiller_samsungen', 'on')
-                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
-                )
-                and states(states('input_select.radio_afspiller')) == 'playing'
-              )
-            }}
+          value_template: "{{ sensorer | count > 0 }}"
       actions:
         - action: homeassistant.update_entity
           target:
-            entity_id: >
-              {{
-                {
-                  'DR P3': 'sensor.dr_p3_nu_spiller',
-                  'DR P4': 'sensor.dr_p4_ostjylland_nu_spiller',
-                  'Nova': 'sensor.nova_nu_spiller'
-                }.get(states('input_select.radio_station'), 'sensor.dr_p3_nu_spiller')
-              }}
+            entity_id: "{{ sensorer }}"
