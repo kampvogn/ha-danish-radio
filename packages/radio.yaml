@@ -45,6 +45,12 @@ radio:
       name: "Radio - stationer pr. afspiller"
       icon: mdi:code-json
       max: 255
+    # JSON: {"media_player.x": "dk.tv2.tv2playtv", ...} - den app, der kørte på
+    # afspillerens fjernbetjening (Android TV), før radioen blev castet dertil.
+    radio_forrige_app:
+      name: "Radio - app før radio pr. afspiller"
+      icon: mdi:code-json
+      max: 255
 
   # "Nu spiller"-sensorer fra integrationen custom_components/danish_radio
   # (sensor.dr_p3_nu_spiller, sensor.dr_p4_ostjylland_nu_spiller,
@@ -94,6 +100,18 @@ radio:
               {{ {
                 'media_player.stue_chromecast': 'remote.stue_google_tv'
               } }}
+            # Pænt navn på Android TV-apps i "Tilbage til"-knappen. Ukendte apps
+            # vises med pakkenavnet.
+            appnavne: >-
+              {{ {
+                'dk.tv2.tv2playtv': 'TV 2 Play',
+                'com.google.android.youtube.tv': 'YouTube',
+                'com.netflix.ninja': 'Netflix',
+                'com.disney.disneyplus': 'Disney+',
+                'com.amazon.amazonvideo.livingroom': 'Prime Video'
+              } }}
+            # Apps, der ikke skal huskes: cast-modtageren og hjemmeskærmen.
+            ikke_apps: "{{ ['com.google.android.apps.mediashell', 'com.google.android.apps.tv.launcherx', 'com.google.android.tvlauncher'] }}"
             # match: tekst i afspillerens media_content_id, der viser, at
             # stationen (stadig) spiller.
             stationer: >-
@@ -138,6 +156,11 @@ radio:
                          .get(states('input_select.radio_afspiller')) %}
               {% set r = (state_attr('sensor.radio_konfiguration', 'fjernbetjeninger') or {}).get(e) %}
               {{ r if r and states(r) not in ['unknown', 'unavailable'] else none }}
+            # App, der kørte før radioen startede, eller none (så går knappen til
+            # hjemmeskærmen).
+            forrige_app: >-
+              {{ (states('input_text.radio_forrige_app') | from_json(default={}))
+                 .get(states('sensor.radio_valgt_afspiller')) }}
 
         - name: "Radio valgt station info"
           unique_id: radio_valgt_station_info
@@ -210,6 +233,18 @@ radio:
               {% endfor %}
               {{ ns.ud }}
 
+    - sensor:
+        - name: "Radio valgt afspiller tilbage til"
+          unique_id: radio_valgt_afspiller_tilbage_til
+          icon: mdi:television-play
+          state: >-
+            {% set app = state_attr('sensor.radio_valgt_afspiller', 'forrige_app') %}
+            {% if app %}
+              {{ (state_attr('sensor.radio_konfiguration', 'appnavne') or {}).get(app, app) }}
+            {% else %}
+              Hjemmeskærm
+            {% endif %}
+
     - binary_sensor:
         # Til dashboardet: vis kun "Hjemmeskærm", når den valgte afspiller har
         # en tilgængelig fjernbetjening.
@@ -267,6 +302,43 @@ radio:
           {{ station_navn == 'DR P3'
              and afspiller in (state_attr('sensor.radio_konfiguration', 'tv') or []) }}
       sequence:
+        # Husk appen på afspillerens fjernbetjening (fx TV 2 Play), så knappen
+        # "Tilbage til" kan åbne den igen. Kører radioen allerede, er appen
+        # cast-modtageren, og den gemte app bevares.
+        - variables:
+            fjernbetjening: >-
+              {% set r = (state_attr('sensor.radio_konfiguration', 'fjernbetjeninger') or {}).get(afspiller) %}
+              {{ r if r and states(r) not in ['unknown', 'unavailable'] else '' }}
+            app: "{{ state_attr(fjernbetjening, 'current_activity') if fjernbetjening else '' }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ fjernbetjening != '' and states(fjernbetjening) == 'on'
+                   and app is string and app != ''
+                   and app not in (state_attr('sensor.radio_konfiguration', 'ikke_apps') or []) }}
+          then:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.radio_forrige_app
+              data:
+                value: >-
+                  {% set gemt = states('input_text.radio_forrige_app') | from_json(default={}) %}
+                  {{ dict(gemt.items() | list + [(afspiller, app)]) | to_json }}
+          else:
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ fjernbetjening != '' and app in (state_attr('sensor.radio_konfiguration', 'ikke_apps') or [])
+                       and app != 'com.google.android.apps.mediashell' }}
+              then:
+                # Startet fra hjemmeskærmen: glem en gammel app.
+                - action: input_text.set_value
+                  target:
+                    entity_id: input_text.radio_forrige_app
+                  data:
+                    value: >-
+                      {% set gemt = states('input_text.radio_forrige_app') | from_json(default={}) %}
+                      {{ dict(gemt.items() | rejectattr(0, 'eq', afspiller) | list) | to_json }}
         - action: input_text.set_value
           target:
             entity_id: input_text.radio_afspiller_stationer
@@ -376,14 +448,16 @@ radio:
           continue_on_error: true
 
     radio_hjem_valgt:
-      alias: "Radio: valgt afspiller til hjemmeskærm"
+      alias: "Radio: valgt afspiller tilbage til forrige app"
       description: >-
-        Lukker cast-appen og trykker Hjem på afspillerens fjernbetjening
-        (se fjernbetjeninger i sensor.radio_konfiguration).
+        Lukker cast-appen og åbner den app, der kørte før radioen (eller
+        hjemmeskærmen) via afspillerens fjernbetjening (se fjernbetjeninger i
+        sensor.radio_konfiguration).
       mode: single
       variables:
         afspiller: "{{ states('sensor.radio_valgt_afspiller') }}"
         fjernbetjening: "{{ state_attr('sensor.radio_valgt_afspiller', 'fjernbetjening') }}"
+        app: "{{ state_attr('sensor.radio_valgt_afspiller', 'forrige_app') or '' }}"
       sequence:
         - condition: template
           value_template: "{{ fjernbetjening is string and fjernbetjening.startswith('remote.') }}"
@@ -395,11 +469,28 @@ radio:
               target:
                 entity_id: "{{ afspiller }}"
               continue_on_error: true
-        - action: remote.send_command
-          target:
-            entity_id: "{{ fjernbetjening }}"
-          data:
-            command: HOME
+        - if:
+            - condition: template
+              value_template: "{{ app != '' }}"
+          then:
+            - action: remote.turn_on
+              target:
+                entity_id: "{{ fjernbetjening }}"
+              data:
+                activity: "{{ app }}"
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.radio_forrige_app
+              data:
+                value: >-
+                  {% set gemt = states('input_text.radio_forrige_app') | from_json(default={}) %}
+                  {{ dict(gemt.items() | rejectattr(0, 'eq', afspiller) | list) | to_json }}
+          else:
+            - action: remote.send_command
+              target:
+                entity_id: "{{ fjernbetjening }}"
+              data:
+                command: HOME
 
     radio_mute_valgt:
       alias: "Radio: mute valgt afspiller"

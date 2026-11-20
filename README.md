@@ -40,10 +40,8 @@ Dashboard example:
         - entity: binary_sensor.radio_valgt_afspiller_har_fjernbetjening
           state: "on"
       row:
-        type: button
-        name: Hjemmeskærm
-        icon: mdi:home
-        action_name: Hjem
+        entity: sensor.radio_valgt_afspiller_tilbage_til
+        name: Tilbage til
         tap_action: {action: perform-action, perform_action: script.radio_hjem_valgt}
   footer:
     type: buttons
@@ -80,9 +78,11 @@ Dashboard example:
 another Android TV) paired with the
 [Android TV Remote](https://www.home-assistant.io/integrations/androidtv_remote/)
 integration, map it in the `fjernbetjeninger` attribute of
-`sensor.radio_konfiguration` (`media_player` → `remote`). The card then shows
-a "Hjemmeskærm" button for that player, which closes the cast app and presses
-Home. Without a mapping, or if the remote is unavailable, the button stays
+`sensor.radio_konfiguration` (`media_player` → `remote`). When radio starts on
+that player, the app running on the TV (e.g. TV 2 Play) is remembered, and the
+card shows a "Tilbage til TV 2 Play" row that closes the cast app and reopens
+it (or goes to the home screen if radio was started from there). Friendly app
+names come from `appnavne`. Without a mapping, or if the remote is unavailable, the button stays
 hidden.
 
 Also install the integration (`custom_components/danish_radio`); the package
