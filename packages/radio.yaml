@@ -9,6 +9,7 @@ radio:
         - media_player.unnamed_room
         - media_player.terasse
         - media_player.tv_samsungen
+        - media_player.stue_chromecast
 
     radio_station:
       name: "Radio - station"
@@ -44,6 +45,9 @@ radio:
     radio_afspiller_samsungen:
       name: "Radio - Samsungen"
       icon: mdi:television
+    radio_afspiller_stue_chromecast:
+      name: "Radio - Stue Chromecast"
+      icon: mdi:cast
 
   command_line:
     - sensor:
@@ -63,6 +67,17 @@ radio:
           - stream_title
           - raw_metadata
           - stream_url
+          - updated_at
+
+    - sensor:
+        name: "DR P3 webcam stream"
+        unique_id: dr_p3_webcam_stream
+        icon: mdi:video
+        command: "python3 /config/scripts/dr_icy_now_playing.py p3webcam"
+        scan_interval: 21600
+        value_template: "{{ value_json.state }}"
+        json_attributes:
+          - source
           - updated_at
 
     - sensor:
@@ -240,18 +255,27 @@ radio:
             url: http://live-bauerdk.sharp-stream.com/nova128.mp3
             logo: https://assets.planetradio.co.uk/img/ConfigWebListenBarLogoImageUrl/174.jpg?ver=1490690222
         valgt_station: "{{ stationer.get(station, stationer['DR P3']) }}"
+        # Fjernsyn får DR P3 som video fra studiet (HLS med lyd), i stedet for mp3.
+        tv_afspillere:
+          - media_player.tv_samsungen
+          - media_player.stue_chromecast
+        p3_video_url: >-
+          {% set u = states('sensor.dr_p3_webcam_stream') %}
+          {{ u if u.startswith('https://') else
+             'https://drp3webcamhls.akamaized.net/hls/live/20003007/p3webcam/mastervg.m3u8' }}
+        video: "{{ station == 'DR P3' and afspiller in tv_afspillere }}"
       sequence:
         - action: media_player.play_media
           target:
             entity_id: "{{ afspiller }}"
           data:
             media:
-              media_content_id: "{{ valgt_station.url }}"
-              media_content_type: music
+              media_content_id: "{{ p3_video_url if video else valgt_station.url }}"
+              media_content_type: "{{ 'application/x-mpegurl' if video else 'music' }}"
               metadata:
                 title: "{{ valgt_station.titel }}"
                 thumbnail: "{{ valgt_station.logo }}"
-                media_class: music
+                media_class: "{{ 'video' if video else 'music' }}"
 
     radio_spil_dr_p3_valgt:
       alias: "Radio: spil DR P3 på valgt afspiller"
@@ -313,6 +337,15 @@ radio:
                 afspiller: media_player.tv_samsungen
                 station: "{{ states('input_select.radio_station') }}"
         - if:
+            - condition: state
+              entity_id: input_boolean.radio_afspiller_stue_chromecast
+              state: "on"
+          then:
+            - action: script.radio_spil_station
+              data:
+                afspiller: media_player.stue_chromecast
+                station: "{{ states('input_select.radio_station') }}"
+        - if:
             - condition: template
               value_template: >
                 {{ not (
@@ -321,6 +354,7 @@ radio:
                   or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
                   or is_state('input_boolean.radio_afspiller_terasse', 'on')
                   or is_state('input_boolean.radio_afspiller_samsungen', 'on')
+                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
                 ) }}
           then:
             - action: script.radio_spil_station
@@ -399,6 +433,14 @@ radio:
               target:
                 entity_id: media_player.tv_samsungen
         - if:
+            - condition: state
+              entity_id: input_boolean.radio_afspiller_stue_chromecast
+              state: "on"
+          then:
+            - action: media_player.media_stop
+              target:
+                entity_id: media_player.stue_chromecast
+        - if:
             - condition: template
               value_template: >
                 {{ not (
@@ -407,6 +449,7 @@ radio:
                   or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
                   or is_state('input_boolean.radio_afspiller_terasse', 'on')
                   or is_state('input_boolean.radio_afspiller_samsungen', 'on')
+                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
                 ) }}
           then:
             - action: media_player.media_stop
@@ -464,6 +507,15 @@ radio:
                 entity_id: media_player.tv_samsungen
               continue_on_error: true
         - if:
+            - condition: state
+              entity_id: input_boolean.radio_afspiller_stue_chromecast
+              state: "on"
+          then:
+            - action: media_player.media_pause
+              target:
+                entity_id: media_player.stue_chromecast
+              continue_on_error: true
+        - if:
             - condition: template
               value_template: >
                 {{ not (
@@ -472,6 +524,7 @@ radio:
                   or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
                   or is_state('input_boolean.radio_afspiller_terasse', 'on')
                   or is_state('input_boolean.radio_afspiller_samsungen', 'on')
+                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
                 ) }}
           then:
             - action: media_player.media_pause
@@ -523,12 +576,21 @@ radio:
         - if:
             - condition: template
               value_template: >
+                {{ is_state('input_boolean.radio_afspiller_stue_chromecast', 'on') and is_state('media_player.stue_chromecast', 'playing') }}
+          then:
+            - action: media_player.media_stop
+              target:
+                entity_id: media_player.stue_chromecast
+        - if:
+            - condition: template
+              value_template: >
                 {{ not (
                   is_state('input_boolean.radio_afspiller_kokken', 'on')
                   or is_state('input_boolean.radio_afspiller_sovevaerelse', 'on')
                   or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
                   or is_state('input_boolean.radio_afspiller_terasse', 'on')
                   or is_state('input_boolean.radio_afspiller_samsungen', 'on')
+                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
                 ) and states(states('input_select.radio_afspiller')) == 'playing' }}
           then:
             - action: media_player.media_stop
@@ -548,6 +610,7 @@ radio:
             - media_player.unnamed_room
             - media_player.terasse
             - media_player.tv_samsungen
+            - media_player.stue_chromecast
       conditions:
         - condition: template
           value_template: >
@@ -557,7 +620,8 @@ radio:
               'media_player.sovevaerelse',
               'media_player.unnamed_room',
               'media_player.terasse',
-              'media_player.tv_samsungen'
+              'media_player.tv_samsungen',
+              'media_player.stue_chromecast'
             ]
             and state_attr(player, 'volume_level') is not none
             and trigger.entity_id in ['input_select.radio_afspiller', player] }}
@@ -583,7 +647,8 @@ radio:
               'media_player.sovevaerelse',
               'media_player.unnamed_room',
               'media_player.terasse',
-              'media_player.tv_samsungen'
+              'media_player.tv_samsungen',
+              'media_player.stue_chromecast'
             ] }}
       actions:
         - action: media_player.volume_set
@@ -620,6 +685,7 @@ radio:
             - input_boolean.radio_afspiller_unnamed_room
             - input_boolean.radio_afspiller_terasse
             - input_boolean.radio_afspiller_samsungen
+            - input_boolean.radio_afspiller_stue_chromecast
       conditions:
         - condition: template
           value_template: >
@@ -670,6 +736,14 @@ radio:
                     station: "{{ states('input_select.radio_station') }}"
             - conditions:
                 - condition: template
+                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_stue_chromecast' and trigger.to_state.state == 'on' }}"
+              sequence:
+                - action: script.radio_spil_station
+                  data:
+                    afspiller: media_player.stue_chromecast
+                    station: "{{ states('input_select.radio_station') }}"
+            - conditions:
+                - condition: template
                   value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_kokken' and trigger.to_state.state == 'off' }}"
               sequence:
                 - action: media_player.media_stop
@@ -703,6 +777,13 @@ radio:
                 - action: media_player.media_stop
                   target:
                     entity_id: media_player.tv_samsungen
+            - conditions:
+                - condition: template
+                  value_template: "{{ trigger.entity_id == 'input_boolean.radio_afspiller_stue_chromecast' and trigger.to_state.state == 'off' }}"
+              sequence:
+                - action: media_player.media_stop
+                  target:
+                    entity_id: media_player.stue_chromecast
 
     - id: radio_opdater_metadata_oftere_ved_afspilning
       alias: "Radio: opdater metadata oftere ved afspilning"
@@ -719,6 +800,7 @@ radio:
               or (is_state('input_boolean.radio_afspiller_unnamed_room', 'on') and is_state('media_player.unnamed_room', 'playing'))
               or (is_state('input_boolean.radio_afspiller_terasse', 'on') and is_state('media_player.terasse', 'playing'))
               or (is_state('input_boolean.radio_afspiller_samsungen', 'on') and is_state('media_player.tv_samsungen', 'playing'))
+              or (is_state('input_boolean.radio_afspiller_stue_chromecast', 'on') and is_state('media_player.stue_chromecast', 'playing'))
               or (
                 not (
                   is_state('input_boolean.radio_afspiller_kokken', 'on')
@@ -726,6 +808,7 @@ radio:
                   or is_state('input_boolean.radio_afspiller_unnamed_room', 'on')
                   or is_state('input_boolean.radio_afspiller_terasse', 'on')
                   or is_state('input_boolean.radio_afspiller_samsungen', 'on')
+                  or is_state('input_boolean.radio_afspiller_stue_chromecast', 'on')
                 )
                 and states(states('input_select.radio_afspiller')) == 'playing'
               )

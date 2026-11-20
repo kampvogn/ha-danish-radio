@@ -8,6 +8,7 @@ import json
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -247,8 +248,58 @@ def get_bauer_now_playing(station: dict[str, object]) -> dict[str, object]:
     }
 
 
+P3_WEBCAM_FALLBACK = (
+    "https://drp3webcamhls.akamaized.net/hls/live/20003007/p3webcam/mastervg.m3u8"
+)
+
+
+def is_live_hls(master_url: str) -> bool:
+    """True when the first variant playlist of an HLS master is still live."""
+    master = read_text(master_url)
+    for line in master.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            variant = urllib.parse.urljoin(master_url, line)
+            return "#EXT-X-ENDLIST" not in read_text(variant)
+    return False
+
+
+def get_p3_webcam_stream() -> dict[str, object]:
+    """Find a live DR P3 studio webcam HLS stream (video + audio) on dr.dk/lyd.
+
+    dr.dk/lyd lists more than one webcam master; old ones stay listed after
+    they have ended (#EXT-X-ENDLIST), so pick the first that is still live.
+    """
+    url, source = "", "fallback"
+    try:
+        page = read_text("https://www.dr.dk/lyd")
+        candidates = dict.fromkeys(
+            re.findall(
+                r"https://drp3webcamhls\.akamaized\.net/[^\"'\\\s]*/master[a-z]*\.m3u8",
+                page,
+            )
+        )
+        for candidate in candidates:
+            try:
+                if is_live_hls(candidate):
+                    url, source = candidate, "dr.dk/lyd"
+                    break
+            except (OSError, TimeoutError, urllib.error.URLError):
+                continue
+    except (OSError, TimeoutError, urllib.error.URLError):
+        pass
+    return {
+        "state": url or P3_WEBCAM_FALLBACK,
+        "source": source,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def main() -> int:
     station_key = sys.argv[1] if len(sys.argv) > 1 else "p3"
+    if station_key == "p3webcam":
+        emit(get_p3_webcam_stream())
+        return 0
     station = STATIONS.get(station_key)
     if station is None:
         emit(
