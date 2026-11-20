@@ -34,6 +34,17 @@ Dashboard example:
       name: Nu spiller
     - entity: input_number.radio_volume
       name: Volumen
+    # Only shown when the selected player has a remote (see below).
+    - type: conditional
+      conditions:
+        - entity: binary_sensor.radio_valgt_afspiller_har_fjernbetjening
+          state: "on"
+      row:
+        type: button
+        name: Hjemmeskærm
+        icon: mdi:home
+        action_name: Hjem
+        tap_action: {action: perform-action, perform_action: script.radio_hjem_valgt}
   footer:
     type: buttons
     entities:
@@ -64,6 +75,15 @@ Dashboard example:
         icon: mdi:stop-circle-outline
         tap_action: {action: perform-action, perform_action: script.radio_stop_alle}
 ```
+
+**Optional remote control.** If a player is a Chromecast with Google TV (or
+another Android TV) paired with the
+[Android TV Remote](https://www.home-assistant.io/integrations/androidtv_remote/)
+integration, map it in the `fjernbetjeninger` attribute of
+`sensor.radio_konfiguration` (`media_player` → `remote`). The card then shows
+a "Hjemmeskærm" button for that player, which closes the cast app and presses
+Home. Without a mapping, or if the remote is unavailable, the button stays
+hidden.
 
 Also install the integration (`custom_components/danish_radio`); the package
 configures its stations.

@@ -86,6 +86,14 @@ radio:
               } }}
             # Fjernsyn: DR P3 spilles som video fra studiet (HLS med lyd).
             tv: "{{ ['media_player.tv_samsungen', 'media_player.stue_chromecast'] }}"
+            # Valgfrit: afspiller -> remote-entity (fx fra Android TV Remote-
+            # integrationen på en Chromecast med Google TV). Kortet viser kun
+            # knappen "Hjemmeskærm", når den valgte afspiller har en remote,
+            # der findes og er tilgængelig. Lad den være {} uden sådan en.
+            fjernbetjeninger: >-
+              {{ {
+                'media_player.stue_chromecast': 'remote.stue_google_tv'
+              } }}
             # match: tekst i afspillerens media_content_id, der viser, at
             # stationen (stadig) spiller.
             stationer: >-
@@ -124,6 +132,12 @@ radio:
               {% set e = (state_attr('sensor.radio_konfiguration', 'afspillere') or {})
                          .get(states('input_select.radio_afspiller')) %}
               {{ state_attr(e, 'volume_level') if e else none }}
+            # Afspillerens remote-entity, hvis den er sat op og tilgængelig, ellers none.
+            fjernbetjening: >-
+              {% set e = (state_attr('sensor.radio_konfiguration', 'afspillere') or {})
+                         .get(states('input_select.radio_afspiller')) %}
+              {% set r = (state_attr('sensor.radio_konfiguration', 'fjernbetjeninger') or {}).get(e) %}
+              {{ r if r and states(r) not in ['unknown', 'unavailable'] else none }}
 
         - name: "Radio valgt station info"
           unique_id: radio_valgt_station_info
@@ -197,6 +211,13 @@ radio:
               {{ ns.ud }}
 
     - binary_sensor:
+        # Til dashboardet: vis kun "Hjemmeskærm", når den valgte afspiller har
+        # en tilgængelig fjernbetjening.
+        - name: "Radio valgt afspiller har fjernbetjening"
+          unique_id: radio_valgt_afspiller_har_fjernbetjening
+          icon: mdi:remote-tv
+          state: "{{ state_attr('sensor.radio_valgt_afspiller', 'fjernbetjening') is string }}"
+
         - name: "Radio valgt afspiller mutet"
           unique_id: radio_valgt_afspiller_muted
           icon: >-
@@ -353,6 +374,32 @@ radio:
           target:
             entity_id: "{{ afspillere }}"
           continue_on_error: true
+
+    radio_hjem_valgt:
+      alias: "Radio: valgt afspiller til hjemmeskærm"
+      description: >-
+        Lukker cast-appen og trykker Hjem på afspillerens fjernbetjening
+        (se fjernbetjeninger i sensor.radio_konfiguration).
+      mode: single
+      variables:
+        afspiller: "{{ states('sensor.radio_valgt_afspiller') }}"
+        fjernbetjening: "{{ state_attr('sensor.radio_valgt_afspiller', 'fjernbetjening') }}"
+      sequence:
+        - condition: template
+          value_template: "{{ fjernbetjening is string and fjernbetjening.startswith('remote.') }}"
+        - if:
+            - condition: template
+              value_template: "{{ states(afspiller) not in ['off', 'unavailable', 'unknown'] }}"
+          then:
+            - action: media_player.turn_off
+              target:
+                entity_id: "{{ afspiller }}"
+              continue_on_error: true
+        - action: remote.send_command
+          target:
+            entity_id: "{{ fjernbetjening }}"
+          data:
+            command: HOME
 
     radio_mute_valgt:
       alias: "Radio: mute valgt afspiller"
